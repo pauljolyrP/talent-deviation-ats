@@ -46,6 +46,15 @@ function candidateScore(candidate: Candidate, scorecards: Scorecard[]) {
   return scoreAverage(card);
 }
 
+function candidateLatestEvent(candidate: Candidate, events: EvidenceEvent[]) {
+  return events.find((event) => event.candidateId === candidate.id);
+}
+
+function shortReason(value?: string | null) {
+  if (!value) return "";
+  return value.length > 118 ? `${value.slice(0, 115).trim()}...` : value;
+}
+
 function sourceClass(type: EvidenceEvent["sourceType"]) {
   if (type === "slack") return "source source-blue";
   if (type === "granola") return "source source-green";
@@ -193,36 +202,24 @@ export function TalentDashboard({ data }: Props) {
           </div>
 
           <div className="funnel" aria-label="Candidate funnel">
-            {STAGES.slice(0, 9).map((stage) => {
+            {STAGES.map((stage) => {
               const stageCandidates = filteredCandidates.filter((candidate) => candidate.stage === stage.name);
+              const terminalStage = stage.name === "Declined" || stage.name === "Keep Warm";
               return (
-                <section className="stage-column" key={stage.name}>
+                <section className={`stage-column ${terminalStage ? "stage-terminal" : ""}`} key={stage.name}>
                   <div className="stage-heading">
                     <span>{stage.name}</span>
                     <strong>{stageCandidates.length}</strong>
                   </div>
                   <div className="candidate-stack">
                     {stageCandidates.map((candidate) => (
-                      <button
-                        className={`candidate-card ${selectedCandidate?.id === candidate.id ? "selected" : ""}`}
+                      <CandidateCard
+                        candidate={candidate}
+                        event={candidateLatestEvent(candidate, data.events)}
                         key={candidate.id}
-                        onClick={() => setSelectedCandidateId(candidate.id)}
-                        type="button"
-                      >
-                        <span className="candidate-name">{candidate.name}</span>
-                        <span className="candidate-meta">{candidate.source ?? candidate.roleTitle}</span>
-                        <span className="candidate-footer">
-                          {candidate.stageOrder >= DOSSIER_UNLOCK_ORDER ? (
-                            <>
-                              <Sparkles size={14} /> dossier
-                            </>
-                          ) : (
-                            <>
-                              <Inbox size={14} /> thin intake
-                            </>
-                          )}
-                        </span>
-                      </button>
+                        selected={selectedCandidate?.id === candidate.id}
+                        onSelect={() => setSelectedCandidateId(candidate.id)}
+                      />
                     ))}
                   </div>
                 </section>
@@ -245,6 +242,44 @@ export function TalentDashboard({ data }: Props) {
         </aside>
       </section>
     </main>
+  );
+}
+
+function CandidateCard({
+  candidate,
+  event,
+  onSelect,
+  selected
+}: {
+  candidate: Candidate;
+  event?: EvidenceEvent;
+  onSelect: () => void;
+  selected: boolean;
+}) {
+  const terminal = candidate.stage === "Declined" || candidate.stage === "Keep Warm";
+  const reason = terminal ? shortReason(event?.body) : "";
+
+  return (
+    <button
+      className={`candidate-card ${selected ? "selected" : ""} ${terminal ? "candidate-terminal" : ""}`}
+      onClick={onSelect}
+      type="button"
+    >
+      <span className="candidate-name">{candidate.name}</span>
+      <span className="candidate-meta">{candidate.source ?? candidate.roleTitle}</span>
+      {reason ? <span className="candidate-reason">{reason}</span> : null}
+      <span className="candidate-footer">
+        {candidate.stageOrder >= DOSSIER_UNLOCK_ORDER ? (
+          <>
+            <Sparkles size={14} /> dossier
+          </>
+        ) : (
+          <>
+            <Inbox size={14} /> thin intake
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 

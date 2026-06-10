@@ -358,6 +358,10 @@ h1 {
   padding: 8px;
 }
 
+.stage-terminal {
+  background: #f4f1ec;
+}
+
 .stage-heading {
   align-items: center;
   display: flex;
@@ -404,15 +408,27 @@ h1 {
   box-shadow: 0 0 0 2px rgba(29, 95, 145, 0.12);
 }
 
+.candidate-terminal {
+  background: #fbf8f4;
+  border-color: #d8c9bd;
+}
+
 .candidate-name {
   font-size: 14px;
   font-weight: 800;
 }
 
 .candidate-meta,
-.candidate-footer {
+.candidate-footer,
+.candidate-reason {
   color: var(--muted);
   font-size: 12px;
+}
+
+.candidate-reason {
+  border-left: 2px solid #c8b7a7;
+  line-height: 1.35;
+  padding-left: 7px;
 }
 
 .candidate-footer {
