@@ -55,7 +55,21 @@ type LocalArtifact = {
   extension: string;
 };
 
+type DriveLinkManifest = {
+  byBasename?: Record<string, string>;
+  byCandidateSlug?: Record<
+    string,
+    {
+      driveUrl?: string;
+      profileUrl?: string;
+      resumeUrl?: string;
+    }
+  >;
+  byPath?: Record<string, string>;
+};
+
 const DEFAULT_PACKET_DIR = path.join(process.cwd(), ".local", "candidate-profiles");
+const DEFAULT_DRIVE_LINK_MANIFEST = path.join(process.cwd(), ".local", "drive-link-manifest.json");
 
 function loadLocalEnv() {
   const envPath = path.join(process.cwd(), ".env.local");
@@ -103,6 +117,13 @@ function slugify(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+function loadDriveLinkManifest() {
+  const configured = process.env.TALENT_ATS_DRIVE_LINK_MANIFEST;
+  const manifestPath = configured ? resolvePath(configured) : DEFAULT_DRIVE_LINK_MANIFEST;
+  if (!fs.existsSync(manifestPath)) return {};
+  return JSON.parse(fs.readFileSync(manifestPath, "utf8")) as DriveLinkManifest;
+}
+
 function candidateTokens(candidate: CandidateRow) {
   return candidate.name
     .toLowerCase()
@@ -110,7 +131,13 @@ function candidateTokens(candidate: CandidateRow) {
     .filter((token) => token.length >= 3 && !["and", "the", "full", "stack"].includes(token));
 }
 
+let driveLinkManifest: DriveLinkManifest = {};
+
 function fileUrl(filePath: string) {
+  const absolutePath = path.resolve(filePath);
+  const basename = path.basename(filePath);
+  const driveUrl = driveLinkManifest.byPath?.[absolutePath] ?? driveLinkManifest.byBasename?.[basename];
+  if (driveUrl) return driveUrl;
   return `/api/private-file?path=${encodeURIComponent(filePath)}`;
 }
 
@@ -214,7 +241,7 @@ function renderProfile({
     "",
     "## Resume",
     "",
-    resume ? `- ${markdownLink(resume.basename, resume.path)}` : "- No resume file located in the operations folder yet.",
+    resume ? `- ${markdownLink(resume.basename, fileUrl(resume.path))}` : "- No resume file located in the operations folder yet.",
     "",
     "## Local Artifacts",
     ""
@@ -224,7 +251,7 @@ function renderProfile({
     lines.push("- No local artifacts matched this candidate yet.");
   } else {
     for (const artifact of artifacts) {
-      lines.push(`- ${markdownLink(artifact.relativePath, artifact.path)}`);
+      lines.push(`- ${markdownLink(artifact.relativePath, fileUrl(artifact.path))}`);
     }
   }
 
@@ -281,6 +308,7 @@ function renderProfile({
 }
 
 loadLocalEnv();
+driveLinkManifest = loadDriveLinkManifest();
 
 const db = getDb();
 const root = packetRoot();
@@ -317,7 +345,7 @@ const nudgeStmt = db.prepare(`
   WHERE candidate_id = ?
   ORDER BY status, due_at, created_at DESC
 `);
-const updateStmt = db.prepare("UPDATE candidates SET profile_url = ?, resume_url = ?, updated_at = ? WHERE id = ?");
+const updateStmt = db.prepare("UPDATE candidates SET drive_url = COALESCE(?, drive_url), profile_url = ?, resume_url = ?, updated_at = ? WHERE id = ?");
 
 const results = candidates.map((candidate) => {
   const slug = candidate.external_id ?? slugify(candidate.name);
@@ -330,6 +358,7 @@ const results = candidates.map((candidate) => {
   const scorecards = scoreStmt.all(candidate.id) as ScorecardRow[];
   const nudges = nudgeStmt.all(candidate.id) as NudgeRow[];
   const profilePath = path.join(candidateDir, "profile.md");
+  const candidateDriveLinks = driveLinkManifest.byCandidateSlug?.[slug];
 
   fs.writeFileSync(
     profilePath,
@@ -343,7 +372,13 @@ const results = candidates.map((candidate) => {
     })
   );
 
-  updateStmt.run(fileUrl(profilePath), resume ? fileUrl(resume.path) : null, new Date().toISOString(), candidate.id);
+  updateStmt.run(
+    candidateDriveLinks?.driveUrl ?? null,
+    candidateDriveLinks?.profileUrl ?? fileUrl(profilePath),
+    candidateDriveLinks?.resumeUrl ?? (resume ? fileUrl(resume.path) : null),
+    new Date().toISOString(),
+    candidate.id
+  );
 
   return {
     candidate: candidate.name,

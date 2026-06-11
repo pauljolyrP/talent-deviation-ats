@@ -1,5 +1,5 @@
 import { getDb, id } from "./db";
-import { normalizeStage, stageOrder } from "./stages";
+import { DOSSIER_UNLOCK_ORDER, normalizeStage, stageOrder } from "./stages";
 import type { NormalizedImport } from "./types";
 
 function slugify(value: string) {
@@ -59,7 +59,7 @@ function upsertCandidate(candidate: NonNullable<NormalizedImport["candidates"]>[
   const role = ensureRole(candidate.role);
   const normalizedStage = normalizeStage(candidate.stage);
   const order = stageOrder(normalizedStage);
-  const retained = candidate.retained === true || order >= 4 ? 1 : 0;
+  const retained = candidate.retained === true || order >= DOSSIER_UNLOCK_ORDER ? 1 : 0;
   const current = findCandidate({
     externalId: candidate.externalId,
     name: candidate.name,
