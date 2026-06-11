@@ -16,7 +16,7 @@ import {
   Sparkles,
   UserRoundCheck
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { DOSSIER_UNLOCK_ORDER, STAGES } from "@/app/lib/stages";
 import type { Candidate, DashboardData, EvidenceEvent, Nudge, Scorecard } from "@/app/lib/types";
@@ -24,6 +24,30 @@ import type { Candidate, DashboardData, EvidenceEvent, Nudge, Scorecard } from "
 type Props = {
   data: DashboardData;
 };
+
+type StageRationale = {
+  event: EvidenceEvent;
+  author: string;
+  reason: string;
+};
+
+const STAGE_KEYWORDS: Record<string, string[]> = {
+  Intake: ["intake", "applicant", "resume", "applied", "application"],
+  "LHH Screened": ["lhh", "screened", "submitted", "presented", "recommended"],
+  "Internal Triage": ["triage", "review", "thoughts", "feedback", "move forward", "yes/no", "approve", "reject"],
+  "HR Screen": ["hr screen", "hr interview", "heather", "moving forward", "approved"],
+  "Case Study": ["case study", "assessment", "exercise", "send case"],
+  "Case Study Review": ["case study", "review", "submission", "completed", "score"],
+  "Hiring Lead Interview": ["paul", "patrick", "hiring lead", "interview", "scheduled"],
+  "Technical Lead Interview": ["michael", "navarro", "technical", "engineering", "interview"],
+  "Final Decision": ["final", "decision", "offer", "calibrate", "debrief"],
+  "Offer / Hired": ["offer", "hired", "accepted"],
+  Declined: ["declined", "reject", "rejected", "not moving", "not move", "pass"],
+  "Keep Warm": ["keep warm", "hold", "later", "side", "bench", "backup"]
+};
+
+const PRIMARY_DECISION_AUTHORS = ["patrick", "paul", "michael"];
+const SECONDARY_DECISION_AUTHORS = ["heather", "anna"];
 
 function formatDate(value?: string | null) {
   if (!value) return "No date";
@@ -47,8 +71,44 @@ function candidateScore(candidate: Candidate, scorecards: Scorecard[]) {
   return scoreAverage(card);
 }
 
-function candidateLatestEvent(candidate: Candidate, events: EvidenceEvent[]) {
-  return events.find((event) => event.candidateId === candidate.id);
+function eventText(event: EvidenceEvent) {
+  return `${event.title} ${event.body} ${event.author ?? ""} ${event.sourceLabel ?? ""}`.toLowerCase();
+}
+
+function stageMatchScore(candidate: Candidate, event: EvidenceEvent) {
+  const text = eventText(event);
+  const author = `${event.author ?? ""} ${event.sourceLabel ?? ""}`.toLowerCase();
+  const keywords = STAGE_KEYWORDS[candidate.stage] ?? [candidate.stage.toLowerCase()];
+  let score = event.evidenceWeight;
+
+  for (const keyword of keywords) {
+    if (text.includes(keyword)) score += 2;
+  }
+
+  if (PRIMARY_DECISION_AUTHORS.some((name) => author.includes(name))) score += 5;
+  if (SECONDARY_DECISION_AUTHORS.some((name) => author.includes(name))) score += 3;
+  if (event.sourceType === "human_note") score += 2;
+  if (event.sourceType === "slack" || event.sourceType === "gmail" || event.sourceType === "granola") score += 1;
+  if (candidate.stage === "Declined" && /(declin|reject|not moving|not move|pass)/.test(text)) score += 4;
+  if (candidate.stage === "Keep Warm" && /(keep warm|hold|later|side|bench)/.test(text)) score += 4;
+
+  return score;
+}
+
+function candidateStageRationale(candidate: Candidate, events: EvidenceEvent[]): StageRationale | undefined {
+  if (events.length === 0) return undefined;
+
+  const [bestEvent] = [...events].sort((a, b) => {
+    const scoreDelta = stageMatchScore(candidate, b) - stageMatchScore(candidate, a);
+    if (scoreDelta !== 0) return scoreDelta;
+    return new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime();
+  });
+
+  return {
+    event: bestEvent,
+    author: bestEvent.author ?? bestEvent.sourceLabel ?? bestEvent.sourceType,
+    reason: shortReason(bestEvent.body)
+  };
 }
 
 function shortReason(value?: string | null) {
@@ -66,6 +126,7 @@ function sourceClass(type: EvidenceEvent["sourceType"]) {
 
 export function TalentDashboard({ data }: Props) {
   const [roleFilter, setRoleFilter] = useState("All");
+  const [nudgeItems, setNudgeItems] = useState(data.nudges);
   const defaultCandidateId =
     data.candidates.find((candidate) => candidate.stage === "Final Decision")?.id ??
     data.candidates.find((candidate) => candidate.stageOrder >= DOSSIER_UNLOCK_ORDER)?.id ??
@@ -73,6 +134,21 @@ export function TalentDashboard({ data }: Props) {
     "";
   const [selectedCandidateId, setSelectedCandidateId] = useState(defaultCandidateId);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    setNudgeItems(data.nudges);
+  }, [data.nudges]);
+
+  const eventsByCandidate = useMemo(() => {
+    const map = new Map<string, EvidenceEvent[]>();
+    for (const event of data.events) {
+      if (!event.candidateId) continue;
+      const existing = map.get(event.candidateId) ?? [];
+      existing.push(event);
+      map.set(event.candidateId, existing);
+    }
+    return map;
+  }, [data.events]);
 
   const filteredCandidates = useMemo(() => {
     return data.candidates.filter((candidate) => {
@@ -83,18 +159,36 @@ export function TalentDashboard({ data }: Props) {
   }, [data.candidates, query, roleFilter]);
 
   const selectedCandidate = data.candidates.find((candidate) => candidate.id === selectedCandidateId) ?? filteredCandidates[0];
-  const selectedEvents = selectedCandidate
-    ? data.events.filter((event) => event.candidateId === selectedCandidate.id).slice(0, 20)
-    : [];
+  const selectedEvents = selectedCandidate ? (eventsByCandidate.get(selectedCandidate.id) ?? []).slice(0, 20) : [];
   const selectedScorecards = selectedCandidate ? data.scorecards.filter((scorecard) => scorecard.candidateId === selectedCandidate.id) : [];
-  const selectedNudges = selectedCandidate ? data.nudges.filter((nudge) => nudge.candidateId === selectedCandidate.id) : [];
+  const selectedNudges = selectedCandidate ? nudgeItems.filter((nudge) => nudge.candidateId === selectedCandidate.id) : [];
   const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_"));
 
-  const openNudges = data.nudges.filter((nudge) => nudge.status === "open");
+  const openNudges = nudgeItems.filter((nudge) => nudge.status === "open");
   const caseStudyCandidates = data.candidates.filter((candidate) => candidate.stageOrder >= DOSSIER_UNLOCK_ORDER && candidate.status !== "declined");
   const standoutCandidate = caseStudyCandidates
     .map((candidate) => ({ candidate, score: candidateScore(candidate, data.scorecards) ?? 0 }))
     .sort((a, b) => b.score - a.score)[0];
+
+  async function markNudgeStatus(id: string, status: Nudge["status"]) {
+    const previous = nudgeItems;
+    setNudgeItems((items) => items.map((nudge) => (nudge.id === id ? { ...nudge, status } : nudge)));
+
+    try {
+      const response = await fetch(`/api/nudges/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update nudge ${id}: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(error);
+      setNudgeItems(previous);
+    }
+  }
 
   return (
     <main className="shell">
@@ -173,7 +267,9 @@ export function TalentDashboard({ data }: Props) {
               {openNudges.length === 0 ? (
                 <p className="empty">No imported nudges.</p>
               ) : (
-                openNudges.slice(0, 8).map((nudge) => <NudgeRow key={nudge.id} nudge={nudge} />)
+                openNudges.slice(0, 8).map((nudge) => (
+                  <NudgeRow key={nudge.id} nudge={nudge} onStatusChange={markNudgeStatus} />
+                ))
               )}
             </div>
           </div>
@@ -216,7 +312,7 @@ export function TalentDashboard({ data }: Props) {
                     {stageCandidates.map((candidate) => (
                       <CandidateCard
                         candidate={candidate}
-                        event={candidateLatestEvent(candidate, data.events)}
+                        events={eventsByCandidate.get(candidate.id) ?? []}
                         key={candidate.id}
                         selected={selectedCandidate?.id === candidate.id}
                         onSelect={() => setSelectedCandidateId(candidate.id)}
@@ -235,6 +331,7 @@ export function TalentDashboard({ data }: Props) {
               candidate={selectedCandidate}
               events={selectedEvents}
               nudges={selectedNudges}
+              onNudgeStatusChange={markNudgeStatus}
               scorecards={selectedScorecards}
             />
           ) : (
@@ -248,17 +345,17 @@ export function TalentDashboard({ data }: Props) {
 
 function CandidateCard({
   candidate,
-  event,
+  events,
   onSelect,
   selected
 }: {
   candidate: Candidate;
-  event?: EvidenceEvent;
+  events: EvidenceEvent[];
   onSelect: () => void;
   selected: boolean;
 }) {
   const terminal = candidate.stage === "Declined" || candidate.stage === "Keep Warm";
-  const reason = terminal ? shortReason(event?.body) : "";
+  const rationale = candidateStageRationale(candidate, events);
 
   return (
     <article
@@ -276,7 +373,12 @@ function CandidateCard({
     >
       <span className="candidate-name">{candidate.name}</span>
       <span className="candidate-meta">{candidate.source ?? candidate.roleTitle}</span>
-      {reason ? <span className="candidate-reason">{reason}</span> : null}
+      {rationale ? (
+        <span className="candidate-reason">
+          <strong>{rationale.author}</strong>
+          {rationale.reason}
+        </span>
+      ) : null}
       <CandidateResourceLinks candidate={candidate} compact />
       <span className="candidate-footer">
         {candidate.stageOrder >= DOSSIER_UNLOCK_ORDER ? (
@@ -367,12 +469,36 @@ function ClerkAuthControl() {
   );
 }
 
-function NudgeRow({ nudge }: { nudge: Nudge }) {
+function NudgeRow({
+  nudge,
+  onStatusChange
+}: {
+  nudge: Nudge;
+  onStatusChange?: (id: string, status: Nudge["status"]) => void;
+}) {
   return (
     <article className="nudge">
-      <strong>{nudge.owner}</strong>
+      <div className="nudge-topline">
+        <strong>{nudge.owner}</strong>
+        <span className={`nudge-status nudge-status-${nudge.status}`}>{nudge.status}</span>
+      </div>
       <p>{nudge.reason}</p>
-      <span>{nudge.dueAt ? formatDate(nudge.dueAt) : "No due date"}</span>
+      <div className="nudge-footer">
+        <span>{nudge.dueAt ? formatDate(nudge.dueAt) : "No due date"}</span>
+        {onStatusChange ? (
+          <div className="nudge-actions">
+            {nudge.status === "open" ? (
+              <button type="button" onClick={() => onStatusChange(nudge.id, "done")}>
+                Done
+              </button>
+            ) : (
+              <button type="button" onClick={() => onStatusChange(nudge.id, "open")}>
+                Reopen
+              </button>
+            )}
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -381,15 +507,18 @@ function CandidateDossier({
   candidate,
   events,
   nudges,
+  onNudgeStatusChange,
   scorecards
 }: {
   candidate: Candidate;
   events: EvidenceEvent[];
   nudges: Nudge[];
+  onNudgeStatusChange: (id: string, status: Nudge["status"]) => void;
   scorecards: Scorecard[];
 }) {
   const unlocked = candidate.stageOrder >= DOSSIER_UNLOCK_ORDER;
   const latestScore = scoreAverage(scorecards[0]);
+  const rationale = candidateStageRationale(candidate, events);
 
   return (
     <div className="dossier-inner">
@@ -425,6 +554,25 @@ function CandidateDossier({
           </a>
         ) : null}
       </div>
+
+      <section className="stage-rationale">
+        <div className="stage-rationale-heading">
+          <h3>Stage Rationale</h3>
+          <span>{candidate.stage}</span>
+        </div>
+        {rationale ? (
+          <>
+            <strong>{rationale.event.title}</strong>
+            <p>{rationale.event.body}</p>
+            <footer>
+              {rationale.author} · {rationale.event.sourceType} · weight {rationale.event.evidenceWeight.toFixed(2)} ·{" "}
+              {formatDate(rationale.event.occurredAt)}
+            </footer>
+          </>
+        ) : (
+          <p className="empty">No supporting stage note imported yet.</p>
+        )}
+      </section>
 
       {!unlocked ? (
         <div className="locked">
@@ -486,7 +634,11 @@ function CandidateDossier({
               <ChevronRight size={17} />
               Candidate Nudges
             </h3>
-            {nudges.length === 0 ? <p className="empty">No candidate-specific nudges.</p> : nudges.map((nudge) => <NudgeRow key={nudge.id} nudge={nudge} />)}
+            {nudges.length === 0 ? (
+              <p className="empty">No candidate-specific nudges.</p>
+            ) : (
+              nudges.map((nudge) => <NudgeRow key={nudge.id} nudge={nudge} onStatusChange={onNudgeStatusChange} />)
+            )}
           </section>
         </>
       )}

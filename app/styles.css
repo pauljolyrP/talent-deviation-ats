@@ -244,8 +244,9 @@ h1 {
 }
 
 .timestamp,
-.nudge span,
 .event footer,
+.nudge-footer span,
+.stage-rationale footer,
 .scorecard span {
   color: var(--muted);
   display: block;
@@ -432,8 +433,16 @@ h1 {
 
 .candidate-reason {
   border-left: 2px solid #c8b7a7;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   line-height: 1.35;
   padding-left: 7px;
+}
+
+.candidate-reason strong {
+  color: var(--ink);
+  font-size: 11px;
 }
 
 .resource-links {
@@ -551,6 +560,55 @@ h1 {
   text-decoration: none;
 }
 
+.stage-rationale {
+  background: #fbfaf7;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+}
+
+.stage-rationale-heading,
+.nudge-topline,
+.nudge-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.stage-rationale-heading {
+  margin-bottom: 8px;
+}
+
+.stage-rationale-heading h3 {
+  font-size: 14px;
+}
+
+.stage-rationale-heading span,
+.nudge-status {
+  background: var(--surface-muted);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+.stage-rationale strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.stage-rationale p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .locked {
   align-items: center;
   background: var(--surface-muted);
@@ -559,6 +617,47 @@ h1 {
   display: flex;
   gap: 10px;
   padding: 12px;
+}
+
+.nudge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nudge-topline strong {
+  font-size: 14px;
+}
+
+.nudge-status-done {
+  background: #e8f4ef;
+  color: var(--green);
+}
+
+.nudge-status-dismissed {
+  background: #f7efe2;
+  color: var(--amber);
+}
+
+.nudge-footer span {
+  margin-top: 0;
+}
+
+.nudge-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.nudge-actions button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 0 8px;
 }
 
 .dossier-section {
